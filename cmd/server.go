@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"regexp"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -23,34 +24,15 @@ const addr = "127.0.0.1:8080"
 const maxUsernameLength = 32
 const maxPasswordLength = 32
 
+const DiscordApi = "https://discord.com/api/v10"
+const ClientId = "1272602862043795586"
+const RedirectUri = "http://localhost/api/callback"
+
 type server struct {
-	db  *sql.DB
-	ctx context.Context
-	srv *http.Server
-}
-
-func usernameSanity(val string) bool {
-	if len(val) > maxUsernameLength {
-		return false
-	}
-
-	p, err := regexp.Compile("^\\w+$")
-	if err != nil {
-		panic(err)
-	}
-	return p.MatchString(val)
-}
-
-func passwordSanity(val string) bool {
-	if len(val) > maxPasswordLength {
-		return false
-	}
-
-	p, err := regexp.Compile("^\\S+$")
-	if err != nil {
-		panic(err)
-	}
-	return p.MatchString(val)
+	db     *sql.DB
+	ctx    context.Context
+	srv    *http.Server
+	secret string
 }
 
 func generateToken(size int) string {
@@ -82,17 +64,6 @@ func (h *server) dbPrepare() error {
 	_, err = h.db.ExecContext(ctx,
 		"CREATE TABLE IF NOT EXISTS `sessions` ("+
 			"token VARCHAR(64) NOT NULL,"+
-			"username VARCHAR(32) PRIMARY KEY,"+
-			"expires_at TIMESTAMP);",
-	)
-	if err != nil {
-		return err
-	}
-
-	_, err = h.db.ExecContext(ctx,
-		"CREATE TABLE IF NOT EXISTS `verifications` ("+
-			"token VARCHAR(64) NOT NULL,"+
-			"email VARCHAR(255) NOT NULL,"+
 			"username VARCHAR(32) PRIMARY KEY,"+
 			"expires_at TIMESTAMP);",
 	)
@@ -153,190 +124,130 @@ func (h *server) dbCreateSession(username string) (string, error) {
 	return token, nil
 }
 
-func (h *server) dbAuthenticateUser(username string, password string) (bool, error) {
-	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
-	defer cancel()
+func discordGetUsername(secret string, code string) (string, error) {
+	client := http.Client{}
 
-	var exists bool
-	err := h.db.QueryRowContext(ctx,
-		"SELECT EXISTS("+
-			"SELECT 1 FROM `users` WHERE `username` = ? AND `password` = ?)",
-		username, password,
-	).Scan(&exists)
+	var payload map[string]interface{}
+	var err error
+	var buf []byte
+	var response *http.Response
 
-	if err != nil {
-		return false, err
+	form := url.Values{
+		"code":          {code},
+		"grant_type":    {"authorization_code"},
+		"client_id":     {ClientId},
+		"client_secret": {secret},
+		"redirect_uri":  {RedirectUri},
 	}
 
-	return exists, nil
-}
-
-func (h *server) dbUserExists(username string) (bool, error) {
-	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
-	defer cancel()
-
-	var exists bool
-	err := h.db.QueryRowContext(ctx,
-		"SELECT EXISTS(SELECT 1 FROM `users` WHERE `username` = ?)", username).Scan(&exists)
+	response, err = http.PostForm(fmt.Sprintf("%s/oauth2/token", DiscordApi), form)
 	if err != nil {
-		return false, err
+		log.Println(err)
+		return "", err
 	}
 
-	return exists, nil
-}
-
-func (h *server) dbCreateUser(username string, password string) error {
-	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
-	defer cancel()
-
-	_, err := h.db.ExecContext(ctx,
-		"INSERT INTO `users` (`username`, `password`) VALUES (?, ?)", username, password)
+	buf, err = io.ReadAll(response.Body)
 	if err != nil {
-		return err
+		log.Println(err)
+		return "", err
 	}
 
-	return nil
+	if response.StatusCode != http.StatusOK {
+		log.Println("bad response status code from oauth2")
+		log.Println(string(buf))
+		return "", err
+	}
+
+	err = json.Unmarshal(buf, &payload)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+
+	if payload["access_token"] == nil {
+		log.Println("missing 'access_token' field from discord api response")
+		log.Println(string(buf))
+		return "", err
+	}
+
+	token := payload["access_token"].(string)
+	request, err := http.NewRequest("GET", fmt.Sprintf("%s/users/@me", DiscordApi), nil)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+
+	request.Header = http.Header{
+		"Authorization": []string{fmt.Sprintf("Bearer %s", token)},
+	}
+
+	response, err = client.Do(request)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+
+	buf, err = io.ReadAll(response.Body)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+
+	err = json.Unmarshal(buf, &payload)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+
+	if payload["username"] == nil {
+		log.Println("missing 'username' field from discord api response")
+		log.Println(string(buf))
+		return "", err
+	}
+
+	return payload["username"].(string), nil
 }
 
-func (h *server) httpHandleRegister(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
+func (h *server) httpHandleCallback(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "GET" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	if req.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+	if !req.URL.Query().Has("code") {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	err := req.ParseForm()
+	code := req.URL.Query().Get("code")
+	username, err := discordGetUsername(h.secret, code)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	if !req.Form.Has("password") && !req.Form.Has("username") {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	username := req.Form.Get("username")
-	if !usernameSanity(username) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	password := req.Form.Get("password")
-	if !passwordSanity(password) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	v, err := h.dbUserExists(username)
-	if v {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte("username taken"))
-		return
-	}
-
-	hash := sha256.New()
-	hash.Write([]byte(password))
-	bs := hash.Sum(nil)
-
-	hashString := fmt.Sprintf("%x", bs)
-	err = h.dbCreateUser(username, hashString)
-	if err != nil {
-		log.Printf("Error while processing register request for username: '%s'\n", username)
-		log.Print(err)
 		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	return
-}
-
-func (h *server) httpHandleLogin(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	if req.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	err := req.ParseForm()
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	if !req.Form.Has("password") && !req.Form.Has("username") {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	username := req.Form.Get("username")
-	if !usernameSanity(username) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	password := req.Form.Get("password")
-	if !passwordSanity(password) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	hash := sha256.New()
-	hash.Write([]byte(password))
-	bs := hash.Sum(nil)
-
-	hashString := fmt.Sprintf("%x", bs)
-
-	v, err := h.dbAuthenticateUser(username, hashString)
-	if err != nil {
-		log.Printf("Error while processing login request for username: '%s'\n", username)
-		log.Print(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	if !v {
-		w.Write([]byte("invalid credentials"))
-		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
 	token, err := h.dbCreateSession(username)
 	if err != nil {
-		log.Printf("Error while processing login request for username: '%s'\n", username)
-		log.Print(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(token))
-
-	return
+	http.Redirect(w, req, fmt.Sprintf("https://storyofalicia.com/?token=%s", token), http.StatusFound)
 }
 
 func (h *server) httpPrepare() {
 	h.srv = &http.Server{}
 	h.srv.Addr = addr
 
-	http.HandleFunc("/login", h.httpHandleLogin)
-	http.HandleFunc("/register", h.httpHandleRegister)
+	http.HandleFunc("/callback", h.httpHandleCallback)
 }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	ctx, stop := context.WithCancel(context.Background())
-
 	var h = server{}
+
+	ctx, stop := context.WithCancel(context.Background())
+	h.secret = os.Args[1]
 	h.ctx = ctx
 
 	err := h.dbConnect()
