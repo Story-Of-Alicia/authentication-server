@@ -14,23 +14,24 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
-const mysqlDsn = "test:1234qweRty@tcp(127.0.0.1:3306)/test"
-const addr = "127.0.0.1:8080"
-
-const DiscordApi = "https://discord.com/api/v10"
-const ClientId = "1272602862043795586"
-const RedirectUri = "http://localhost/api/callback"
+const DiscordApiURI = "https://discord.com/api/v10"
+const DiscordClientId = "1272602862043795586"
 
 type server struct {
-	db     *sql.DB
-	ctx    context.Context
-	srv    *http.Server
+	db  *sql.DB
+	ctx context.Context
+	srv *http.Server
+
 	secret string
+	dbDsn  string
+	addr   string
+	redir  string
 }
 
 func generateToken(size int) string {
@@ -52,11 +53,11 @@ func generateToken(size int) string {
 	return string(b)
 }
 
-func (h *server) dbPrepare() error {
-	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+func (s *server) dbPrepare() error {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
 
-	_, err := h.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx,
 		"CREATE TABLE IF NOT EXISTS `users` ("+
 			"email VARCHAR(255) NOT NULL,"+
 			"password varchar(32) NOT NULL,"+
@@ -66,7 +67,7 @@ func (h *server) dbPrepare() error {
 		return err
 	}
 
-	_, err = h.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		"CREATE TABLE IF NOT EXISTS `sessions` ("+
 			"token VARCHAR(64) NOT NULL,"+
 			"username VARCHAR(32) PRIMARY KEY,"+
@@ -79,8 +80,8 @@ func (h *server) dbPrepare() error {
 	return nil
 }
 
-func (h *server) dbConnect() error {
-	db, err := sql.Open("mysql", mysqlDsn)
+func (s *server) dbConnect() error {
+	db, err := sql.Open("mysql", s.dbDsn)
 	if err != nil {
 		return err
 	}
@@ -89,20 +90,20 @@ func (h *server) dbConnect() error {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(10)
 
-	h.db = db
+	s.db = db
 
 	return nil
 }
 
-func (h *server) dbCreateSession(username string) (string, error) {
-	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+func (s *server) dbCreateSession(username string) (string, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
 
 	token := generateToken(32)
 	expiry := time.Now().Add(time.Hour)
 
 	var exists bool
-	err := h.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(ctx,
 		"SELECT EXISTS("+
 			"SELECT 1 FROM `sessions` WHERE `username` = ?)",
 		username,
@@ -113,13 +114,13 @@ func (h *server) dbCreateSession(username string) (string, error) {
 	}
 
 	if exists {
-		_, err := h.db.ExecContext(ctx,
+		_, err := s.db.ExecContext(ctx,
 			"UPDATE `sessions` SET `token` = ?, `expires_at` = ? WHERE username = ?", token, expiry, username)
 		if err != nil {
 			return "", err
 		}
 	} else {
-		_, err := h.db.ExecContext(ctx,
+		_, err := s.db.ExecContext(ctx,
 			"INSERT `sessions` (`username`, `token`, `expires_at`) VALUES (?, ?, ?)", username, token, expiry)
 		if err != nil {
 			return "", err
@@ -129,7 +130,7 @@ func (h *server) dbCreateSession(username string) (string, error) {
 	return token, nil
 }
 
-func discordGetUsername(secret string, code string) (string, error) {
+func (s *server) discordGetUsername(code string) (string, error) {
 	client := http.Client{}
 
 	var payload map[string]interface{}
@@ -140,12 +141,12 @@ func discordGetUsername(secret string, code string) (string, error) {
 	form := url.Values{
 		"code":          {code},
 		"grant_type":    {"authorization_code"},
-		"client_id":     {ClientId},
-		"client_secret": {secret},
-		"redirect_uri":  {RedirectUri},
+		"client_id":     {DiscordClientId},
+		"client_secret": {s.secret},
+		"redirect_uri":  {s.redir},
 	}
 
-	response, err = client.PostForm(fmt.Sprintf("%s/oauth2/token", DiscordApi), form)
+	response, err = client.PostForm(fmt.Sprintf("%s/oauth2/token", DiscordApiURI), form)
 	if err != nil {
 		log.Println(err)
 		return "", err
@@ -177,7 +178,7 @@ func discordGetUsername(secret string, code string) (string, error) {
 	}
 
 	token := payload["access_token"].(string)
-	request, err := http.NewRequest("GET", fmt.Sprintf("%s/users/@me", DiscordApi), nil)
+	request, err := http.NewRequest("GET", fmt.Sprintf("%s/users/@me", DiscordApiURI), nil)
 	if err != nil {
 		log.Println(err)
 		return "", err
@@ -215,7 +216,7 @@ func discordGetUsername(secret string, code string) (string, error) {
 	return payload["username"].(string), nil
 }
 
-func (h *server) httpHandleCallback(w http.ResponseWriter, req *http.Request) {
+func (s *server) httpHandleCallback(w http.ResponseWriter, req *http.Request) {
 	if req.Method != "GET" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -228,7 +229,7 @@ func (h *server) httpHandleCallback(w http.ResponseWriter, req *http.Request) {
 
 	code := req.URL.Query().Get("code")
 
-	regex, err := regexp.Compile("^[A-z0-9]$")
+	regex, err := regexp.Compile("^[A-z0-9]*$")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -238,13 +239,13 @@ func (h *server) httpHandleCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	username, err := discordGetUsername(h.secret, code)
+	username, err := s.discordGetUsername(code)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	token, err := h.dbCreateSession(username)
+	token, err := s.dbCreateSession(username)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -253,20 +254,45 @@ func (h *server) httpHandleCallback(w http.ResponseWriter, req *http.Request) {
 	http.Redirect(w, req, fmt.Sprintf("https://storyofalicia.com/?token=%s", token), http.StatusFound)
 }
 
-func (h *server) httpPrepare() {
-	h.srv = &http.Server{}
-	h.srv.Addr = addr
+func (s *server) httpPrepare() {
+	s.srv = &http.Server{}
+	s.srv.Addr = s.addr
 
-	http.HandleFunc("/callback", h.httpHandleCallback)
+	http.HandleFunc("/callback", s.httpHandleCallback)
 }
 
+func (s *server) parseEnv() {
+	env := os.Environ()
+	for _, e := range env {
+		k := strings.Split(e, "=")[0]
+		v := strings.Split(e, "=")[1]
+		switch {
+		case k == "SECRET":
+			s.secret = v
+		case k == "DATABASE":
+			s.dbDsn = v
+		case k == "ADDRESS":
+			s.addr = v
+		case k == "REDIRECTION":
+			s.redir = v
+		}
+	}
+}
+
+/* environment parameters:
+ * SECRET -> discord application secret
+ * DATABASE -> database DSN
+ * ADDRESS -> http server bind address
+ * REDIRECTION -> oauth2 redirection url
+ */
 func main() {
 	/* set verbose logging */
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	var h = server{}
+	h.parseEnv()
+
 	ctx, stop := context.WithCancel(context.Background())
-	h.secret = os.Args[1]
 	h.ctx = ctx
 
 	err := h.dbConnect()
