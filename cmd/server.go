@@ -21,7 +21,6 @@ import (
 )
 
 const DiscordApiURI = "https://discord.com/api/v10"
-const DiscordClientId = "1272602862043795586"
 
 type server struct {
 	db  *sql.DB
@@ -29,6 +28,7 @@ type server struct {
 	srv *http.Server
 
 	secret string
+	id     string
 	dbDsn  string
 	addr   string
 	redir  string
@@ -141,7 +141,7 @@ func (s *server) discordGetUsername(code string) (string, error) {
 	form := url.Values{
 		"code":          {code},
 		"grant_type":    {"authorization_code"},
-		"client_id":     {DiscordClientId},
+		"client_id":     {s.id},
 		"client_secret": {s.secret},
 		"redirect_uri":  {s.redir},
 	}
@@ -267,8 +267,10 @@ func (s *server) parseEnv() {
 		k := strings.Split(e, "=")[0]
 		v := strings.Split(e, "=")[1]
 		switch {
-		case k == "SECRET":
+		case k == "CLIENT_SECRET":
 			s.secret = v
+		case k == "CLIENT_ID":
+			s.id = v
 		case k == "DATABASE":
 			s.dbDsn = v
 		case k == "ADDRESS":
@@ -280,7 +282,8 @@ func (s *server) parseEnv() {
 }
 
 /* environment parameters:
- * SECRET -> discord application secret
+ * CLIENT_SECRET -> discord application secret
+ * CLIENT_ID -> discord application id
  * DATABASE -> database DSN
  * ADDRESS -> http server bind address
  * REDIRECTION -> oauth2 redirection url
