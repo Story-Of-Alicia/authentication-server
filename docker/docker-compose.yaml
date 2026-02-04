@@ -2,11 +2,11 @@ services:
   soaauth:
     image: soaauth
     ports:
-      - "8080:8080"
+      - "80:80"
     environment:
-      ADDRESS: "127.0.0.1:8080"
-      CLIENT_ID:
-      CLIENT_SECRET:
-      DATA_DIR: "/opt/data/users"
-      OAUTH2_URI: "http://play.storyofalicia.com/callback"
-      FORWARD_URI: "https://storyofalicia.com"
+      BIND_ADDR: "0.0.0.0:80"
+      DISCORD_CLIENT_ID: <discord oauth2 client secret>
+      DISCORD_CLIENT_SECRET: <discord oauth2 client id>
+      DATA_DIR: "/tmp"
+      OAUTH2_URI: <URI used in oauth2 redirect>
+      FORWARD_URI: <URI to redirect to after successful authentication>
