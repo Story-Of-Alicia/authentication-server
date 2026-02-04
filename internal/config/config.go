@@ -11,7 +11,7 @@ type DiscordConfig struct {
 	ClientID     string `env:"CLIENT_ID"`
 	ClientSecret string `env:"CLIENT_SECRET"`
 	RedirectUri  string `env:"OAUTH_REDIRECT"`
-	DiscordApiUri string `env:", default=https://discord.com/api/v10"`
+	DiscordApiUri string `env:"DISCORD_API_URI, default=https://discord.com/api/v10"`
 }
 
 type Config struct {

@@ -3,8 +3,14 @@ package api
 import (
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"regexp"
 	"soaauth/internal/database"
+	"soaauth/internal/oauth2"
 	"soaauth/internal/types"
+
+	"github.com/google/uuid"
 )
 
 type APIServer struct {
@@ -29,6 +35,16 @@ func NewAPIServer(addr string) (APIServer, error) {
 }
 
 func (s *APIServer) Serv() {
+	signalHandler := make(chan os.Signal, 3)
+	signal.Notify(signalHandler, os.Interrupt)
+
+	go func() {
+		<-signalHandler
+		s.db.Cancel()
+		_ = s.db.CloseConn()
+		_ = s.serv.Close()
+	}()
+
 	log.Println("Start server at addr: " + s.addr)
 
 	http.HandleFunc("/callback", MakeHTTPFunc(s.handleDiscordCallback))
@@ -44,7 +60,66 @@ func (s *APIServer) handleDiscordCallback(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	code, error := getCodeFromQuery(r)
+	if error != nil {
+		return error
+	}
+
+	username, error := oauth2.DiscordGetUsername(code)
+
+	if error != nil {
+		return error
+	}
+
+	exists, err := s.db.IsSessionExists(username)
+
+	if err != nil {
+		return &types.APIError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
+
+	token := uuid.NewString()
+
+	if exists {
+		s.db.UpdateSession(username, token)
+	} else {
+		s.db.CreateSession(username, token)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	http.Redirect(w, r, "https://storyofalicia.com/?token=%s"+token, http.StatusPermanentRedirect)
+
 	return nil
+}
+
+func getCodeFromQuery(r *http.Request) (string, *types.APIError) {
+	if !r.URL.Query().Has("code") {
+		return "", &types.APIError{
+			Code:    http.StatusBadRequest,
+			Message: "Code must be provided",
+		}
+	}
+
+	code := r.URL.Query().Get("code")
+
+	regex, err := regexp.Compile("^[A-z0-9]*$")
+	if err != nil {
+		return "", &types.APIError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
+
+	if !regex.MatchString(code) {
+		return "", &types.APIError{
+			Code:    http.StatusBadRequest,
+			Message: "Invalid code",
+		}
+	}
+
+	return code, nil
 }
 
 // package api

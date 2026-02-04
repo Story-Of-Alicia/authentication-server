@@ -6,8 +6,3 @@ type Reponse struct {
 	Message string `json:"message"`
 	Data any `json:"data"`
 }
-
-
-type TokenResponse struct {
-	Token string `json:"token"`
-}
