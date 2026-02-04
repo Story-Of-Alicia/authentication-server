@@ -3,23 +3,24 @@ package database
 import (
 	"context"
 	"database/sql"
+	"soaauth/internal/config"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
-
 type DB struct {
 	db *sql.DB
 
-	ctx context.Context
-	cancel context.CancelFunc
+	ctx    context.Context
+	Cancel context.CancelFunc
 
 	addr string
 }
 
+func CreateDb() (DB, error) {
+	addr := config.GetConfigInstance().DbDSN
 
-func CreateDb(addr string) (DB, error) {
 	db, err := sql.Open("mysql", addr)
 
 	if err != nil {
@@ -32,24 +33,20 @@ func CreateDb(addr string) (DB, error) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(10)
 
-
-
 	return DB{
-		db: db,
-		addr: addr,
-		ctx: ctx,
-		cancel: cancel,
+		db:     db,
+		addr:   addr,
+		ctx:    ctx,
+		Cancel: cancel,
 	}, nil
 }
 
-
-func (d *DB) initTables() error{
-	ctx, cancel := context.WithTimeout(d.ctx, 5 * time.Second);
+func (d *DB) initTables() error {
+	ctx, cancel := context.WithTimeout(d.ctx, 5*time.Second)
 	defer cancel()
 
 	_, err := d.db.ExecContext(ctx,
 		"CREATE TABLE IF NOT EXISTS `sessions` ("+
-			"id SERIAL PRIMARY KEY,"+
 			"token VARCHAR(64) NOT NULL,"+
 			"username VARCHAR(32) NOT NULL,"+
 			"expires_at TIMESTAMP);",
@@ -59,17 +56,17 @@ func (d *DB) initTables() error{
 		return err
 	}
 
-	_, err = d.db.ExecContext(ctx, 
-	"CREATE INDEX session_index ON sessions"+
-	"(token, username);")
+	_, err = d.db.ExecContext(ctx,
+		"CREATE INDEX session_index ON sessions"+
+			"(token, username);")
 
 	if err != nil {
 		return err
 	}
 
-	_, err = d.db.ExecContext(ctx, 
-	"CREATE UNIQUE INDEX unique_session_index ON sessions"+
-	"(username);")
+	_, err = d.db.ExecContext(ctx,
+		"CREATE UNIQUE INDEX unique_session_index ON sessions"+
+			"(username);")
 
 	if err != nil {
 		return err
@@ -78,17 +75,81 @@ func (d *DB) initTables() error{
 	return nil
 }
 
-
 func (d *DB) DropTables() error {
-	ctx, cancel := context.WithTimeout(d.ctx, 5 * time.Second);
+	ctx, cancel := context.WithTimeout(d.ctx, 5*time.Second)
 	defer cancel()
 
-	_, err := d.db.ExecContext(ctx, 
-	"DROP TABLE sessions;");
+	_, err := d.db.ExecContext(ctx,
+		"DROP TABLE sessions;")
 
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (d *DB) CreateSession(username string, token string) (string, error) {
+	ctx, cancle := context.WithTimeout(d.ctx, 5*time.Second)
+	defer cancle()
+
+	expiriation := time.Now().Add(time.Hour)
+
+	_, err := d.db.ExecContext(ctx,
+		"INSERT sessions (username, token, expires_at) VALUES (?, ?, ?)",
+		username, token, expiriation)
+
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
+func (d *DB) IsSessionExists(username string) (bool, error) {
+	ctx, cancle := context.WithTimeout(d.ctx, 5*time.Second)
+	defer cancle()
+
+	var exists bool
+
+	err := d.db.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM session WHERE username = ?)",
+		username).Scan(&exists)
+
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
+func (d *DB) UpdateSession(username string, token string) error {
+	ctx, cancle := context.WithTimeout(d.ctx, 5*time.Second)
+	defer cancle()
+
+	expiration := time.Now().Add(time.Hour)
+
+	_, err := d.db.ExecContext(ctx,
+		"UPDATE sessions SET token = ?, expires_at = ? WHERE username = ?", token, expiration, username)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *DB) DeleteSession(username string) {
+	ctx, cancle := context.WithTimeout(d.ctx, 5*time.Second)
+	defer cancle()
+
+	_, err := d.db.ExecContext(ctx, "DELETE FROM sessions WHERE username = ?", username)
+
+	if err != nil {
+		return
+	}
+}
+
+func (d *DB) CloseConn() error {
+	return d.db.Close()
 }
