@@ -1,9 +1,9 @@
 package main
 
 import (
+	"authentication-server/internal"
+	"authentication-server/internal/providers"
 	"log"
-	"soaauth/internal"
-	"soaauth/internal/providers"
 )
 
 func main() {

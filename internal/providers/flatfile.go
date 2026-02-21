@@ -1,12 +1,12 @@
 package providers
 
 import (
+	"authentication-server/internal"
+	"authentication-server/internal/facade"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"soaauth/internal"
-	"soaauth/internal/facade"
 	"time"
 )
 

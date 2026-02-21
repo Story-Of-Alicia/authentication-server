@@ -1,12 +1,12 @@
 package internal
 
 import (
+	"authentication-server/internal/facade"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"regexp"
-	"soaauth/internal/facade"
 )
 
 type AuthenticationServer struct {
