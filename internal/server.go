@@ -64,7 +64,7 @@ func (a *AuthenticationServer) ServeHTTP(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	http.Redirect(writer, request, fmt.Sprintf("%s/?token=%s&userID=%s", a.RedirectURI, session.Token, session.User), http.StatusFound)
+	http.Redirect(writer, request, fmt.Sprintf("%s/?token=%s&user=%s", a.RedirectURI, session.Token, session.User), http.StatusFound)
 }
 
 func (a *AuthenticationServer) Serve() {
