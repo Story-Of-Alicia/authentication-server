@@ -27,7 +27,7 @@ func parseEnv() map[string]string {
 
 func main() {
 	/* set verbose logging */
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Ldate | log.Ltime)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -36,6 +36,7 @@ func main() {
 
 	go func() {
 		<-signalHandler
+		log.Println("Authentication server is shutting down")
 		cancel()
 	}()
 
@@ -48,7 +49,6 @@ func main() {
 		Ctx:          ctx,
 	}
 
-	println(vars["POSTGRES_DSN"])
 	provider := providers.PostgresSessionProvider{
 		DSN: vars["POSTGRES_DSN"],
 		Ctx: ctx,
@@ -58,7 +58,7 @@ func main() {
 		SessionProvider: &provider,
 		DiscordClient:   &dc,
 		RedirectURI:     vars["REDIRECT_URL"],
-		BindAddress:     "0.0.0.0:8080",
+		BindAddress:     vars["BIND_ADDRESS"],
 		Ctx:             ctx,
 	}
 
@@ -67,6 +67,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	log.Printf("Authentication server is listening on %s\n", api.BindAddress)
 	api.Serve()
 
 	defer cancel()
