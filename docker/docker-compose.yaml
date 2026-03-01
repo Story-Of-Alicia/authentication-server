@@ -1,12 +1,13 @@
 services:
-  soaauth:
-    image: soaauth
+  soa-authentication:
+    image: soa-authentication
     ports:
-      - "80:80"
+      - "8080:8080"
     environment:
-      BIND_ADDR: "0.0.0.0:80"
-      DISCORD_CLIENT_ID: <discord oauth2 client secret>
-      DISCORD_CLIENT_SECRET: <discord oauth2 client id>
-      DATA_DIR: "/tmp"
-      OAUTH2_URI: <URI used in oauth2 redirect>
-      FORWARD_URI: <URI to redirect to after successful authentication>
+      BIND_ADDRESS: "0.0.0.0:8080"
+      DISCORD_CLIENT_ID: "id"
+      DISCORD_CLIENT_SECRET: "secret"
+      DISCORD_OAUTH2_URI: "http://127.0.0.1:8080/"
+      POSTGRES_DSN: "postgres://postgres:postgres@127.0.0.1/postgres"
+      REDIRECT_URL: "https://play.storyofalicia.com"
+
