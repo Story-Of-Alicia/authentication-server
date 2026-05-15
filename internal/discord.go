@@ -22,13 +22,18 @@ type DiscordClient struct {
 	Ctx          context.Context
 }
 
-// FetchUserID Retrieve discord id from oauth2 code
-func (d *DiscordClient) FetchUserID(code string) (string, error) {
+type DiscordUser struct {
+	id       string
+	username string
+}
+
+// FetchUser Retrieve discord user from oauth2 code
+func (d *DiscordClient) FetchUser(code string) (DiscordUser, error) {
 	/* if context is canceled, return error */
 	select {
 	default:
 	case <-d.Ctx.Done():
-		return "", d.Ctx.Err()
+		return DiscordUser{}, d.Ctx.Err()
 	}
 
 	ctx, cancel := context.WithTimeout(d.Ctx, 20*time.Second)
@@ -53,39 +58,43 @@ func (d *DiscordClient) FetchUserID(code string) (string, error) {
 	response, err = client.PostForm(fmt.Sprintf("%s/oauth2/token", DiscordApiURI), form)
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
 	buf, err = io.ReadAll(response.Body)
 	_ = response.Body.Close()
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
+	/* TODO: read the response of the oauth2 api and don't return 500 when
+	 * the oauth2 code expired, redirect to the launch website with an error
+	 * message
+	 */
 	if response.StatusCode != http.StatusOK {
 		log.Println("bad response status code from oauth2")
 		log.Println(string(buf))
-		return "", errors.New("bad response from oauth2")
+		return DiscordUser{}, errors.New("bad response from oauth2")
 	}
 
 	err = json.Unmarshal(buf, &payload)
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
 	if payload["access_token"] == nil {
 		log.Println("missing 'access_token' field from discord api response")
 		log.Println(string(buf))
-		return "", err
+		return DiscordUser{}, err
 	}
 
 	token := payload["access_token"].(string)
 	request, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/users/@me", DiscordApiURI), nil)
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
 	request.Header = http.Header{
@@ -95,27 +104,39 @@ func (d *DiscordClient) FetchUserID(code string) (string, error) {
 	response, err = client.Do(request)
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
 	buf, err = io.ReadAll(response.Body)
 	_ = response.Body.Close()
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
 	err = json.Unmarshal(buf, &payload)
 	if err != nil {
 		log.Println(err)
-		return "", err
+		return DiscordUser{}, err
 	}
 
-	if payload["id"] == nil {
+	user := DiscordUser{}
+
+	if id, ok := payload["id"].(string); ok {
+		user.id = id
+	} else {
 		log.Println("missing 'id' field from discord api response")
 		log.Println(string(buf))
-		return "", err
+		return user, errors.New("bad response from discord api")
 	}
 
-	return payload["id"].(string), nil
+	if username, ok := payload["username"].(string); ok {
+		user.username = username
+	} else {
+		log.Println("missing 'id' field from discord api response")
+		log.Println(string(buf))
+		return user, errors.New("bad response from discord api")
+	}
+
+	return user, nil
 }

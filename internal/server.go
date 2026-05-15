@@ -50,21 +50,21 @@ func (a *AuthenticationServer) ServeHTTP(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	userID, err := a.DiscordClient.FetchUserID(code)
+	user, err := a.DiscordClient.FetchUser(code)
 	if err != nil {
-		log.Println("failed to fetch discord userID: ", err)
+		log.Println("failed to fetch discord user: ", err)
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	session, err := a.SessionProvider.CreateSession(userID)
+	session, err := a.SessionProvider.CreateSession(user.id)
 	if err != nil {
 		log.Println("failed to create session:", err)
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(writer, request, fmt.Sprintf("%s/?token=%s&user=%s", a.RedirectURI, session.Token, session.User), http.StatusFound)
+	http.Redirect(writer, request, fmt.Sprintf("%s/?token=%s&user=%s&username=%s", a.RedirectURI, session.Token, session.User, user.username), http.StatusFound)
 }
 
 func (a *AuthenticationServer) Serve() {
