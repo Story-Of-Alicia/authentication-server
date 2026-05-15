@@ -63,6 +63,10 @@ func (d *DiscordClient) FetchUserID(code string) (string, error) {
 		return "", err
 	}
 
+	/* TODO: read the response of the oauth2 api and don't return 500 when
+	 * the oauth2 code expired, redirect to the launch website with an error
+	 * message
+	 */
 	if response.StatusCode != http.StatusOK {
 		log.Println("bad response status code from oauth2")
 		log.Println(string(buf))
