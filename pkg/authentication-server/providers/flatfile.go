@@ -1,7 +1,7 @@
 package providers
 
 import (
-	authentication_server2 "authentication-server/pkg/authentication-server"
+	"authentication-server/pkg/authentication-server"
 	"authentication-server/pkg/authentication-server/facade"
 	"encoding/json"
 	"fmt"
@@ -45,7 +45,7 @@ func (s *FlatFileSessionProvider) CreateSession(username string) (facade.Session
 		return facade.Session{}, err
 	}
 
-	token, err := authentication_server2.GenerateSessionToken(authentication_server2.TokenSize)
+	token, err := authentication_server.GenerateSessionToken(authentication_server.TokenSize)
 	if err != nil {
 		log.Println(err)
 		return facade.Session{}, err
