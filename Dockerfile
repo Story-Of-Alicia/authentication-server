@@ -7,6 +7,7 @@ RUN CGO_ENABLED=0 go build -o /authentication-server ./cmd/authentication-server
 CMD ["/authentication-server"]
 
 FROM alpine:latest
+RUN apk add --no-cache ca-certificates
 
 COPY --from=build /authentication-server /bin/authentication-server
 RUN chmod 0755 /bin/authentication-server
