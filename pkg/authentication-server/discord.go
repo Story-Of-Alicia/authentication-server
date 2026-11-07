@@ -1,4 +1,4 @@
-package internal
+package authentication_server
 
 import (
 	"context"

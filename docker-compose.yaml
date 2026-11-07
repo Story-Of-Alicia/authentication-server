@@ -1,0 +1,31 @@
+services:
+  soa-authentication:
+    image: soa-authentication
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      DISCORD_CLIENT_ID: "id"
+      DISCORD_CLIENT_SECRET: "secret"
+      DISCORD_OAUTH2_URI: "http://127.0.0.1:8080/"
+      POSTGRES_DSN: "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
+      REDIRECT_URL: "https://play.storyofalicia.com"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

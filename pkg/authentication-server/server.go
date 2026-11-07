@@ -1,7 +1,7 @@
-package internal
+package authentication_server
 
 import (
-	"authentication-server/internal/facade"
+	"authentication-server/pkg/authentication-server/facade"
 	"context"
 	"errors"
 	"fmt"

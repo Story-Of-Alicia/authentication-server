@@ -1,8 +1,8 @@
 package providers
 
 import (
-	"authentication-server/internal"
-	"authentication-server/internal/facade"
+	"authentication-server/pkg/authentication-server"
+	"authentication-server/pkg/authentication-server/facade"
 	"context"
 	"database/sql"
 	"log"
@@ -20,7 +20,7 @@ type PostgresSessionProvider struct {
 }
 
 func (p *PostgresSessionProvider) CreateSession(username string) (facade.Session, error) {
-	token, err := internal.GenerateSessionToken(TokenLength)
+	token, err := authentication_server.GenerateSessionToken(TokenLength)
 	if err != nil {
 		log.Fatal("failed to generate session token")
 		return facade.Session{}, err

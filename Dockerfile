@@ -1,13 +1,14 @@
-FROM golang:alpine AS build
-RUN apk update
-RUN apk add go
+FROM golang:1.26 AS build
 
-WORKDIR "/build"
+WORKDIR /build
 COPY . .
-RUN go mod download
-RUN go build -v -o /usr/local/bin/auth cmd/main.go
+RUN CGO_ENABLED=0 go build -o /authentication-server ./cmd/authentication-server/main.go
 
-FROM golang:alpine
+CMD ["/authentication-server"]
 
-COPY --from=build /usr/local/bin /usr/local/bin
-CMD ["/usr/local/bin/auth"]
+FROM alpine:latest
+
+COPY --from=build /authentication-server /bin/authentication-server
+RUN chmod 0755 /bin/authentication-server
+
+CMD ["/bin/authentication-server"]

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"authentication-server/internal"
-	"authentication-server/internal/providers"
+	"authentication-server/pkg/authentication-server"
+	"authentication-server/pkg/authentication-server/providers"
 	"context"
 	"log"
 	"os"
@@ -77,7 +77,7 @@ func main() {
 
 	vars := parseEnv()
 
-	dc := internal.DiscordClient{
+	dc := authentication_server.DiscordClient{
 		ClientID:     vars["DISCORD_CLIENT_ID"],
 		ClientSecret: vars["DISCORD_CLIENT_SECRET"],
 		Oauth2URI:    vars["DISCORD_OAUTH2_URI"],
@@ -89,7 +89,7 @@ func main() {
 		Ctx: ctx,
 	}
 
-	api := internal.AuthenticationServer{
+	api := authentication_server.AuthenticationServer{
 		SessionProvider: &provider,
 		DiscordClient:   &dc,
 		RedirectURI:     vars["REDIRECT_URL"],
