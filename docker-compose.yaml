@@ -7,6 +7,7 @@ services:
     ports:
       - "8080:80"
     environment:
+      BIND_ADDRESS: "0.0.0.0:80"
       DISCORD_CLIENT_ID: "id"
       DISCORD_CLIENT_SECRET: "secret"
       DISCORD_OAUTH2_URI: "http://127.0.0.1:8080/"
